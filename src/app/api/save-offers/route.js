@@ -1,6 +1,6 @@
 // app/api/save-offers/route.js
 import { NextResponse } from "next/server";
-import clientPromise from "../../../lib/mongodb";
+import { query } from "../../../lib/mysql";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../lib/authOptions";
 
@@ -54,44 +54,53 @@ export async function POST(req) {
       );
     }
 
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("offers");
-
     // 🔄 Update existing offer
     if (body.id !== undefined && body.id !== null) {
-      const existing = await collection.findOne({ id: body.id });
-      if (existing) {
-        const { id, _id, ...updatableFields } = body;
-
-        const result = await collection.updateOne(
-          { id: body.id },
-          { $set: { ...updatableFields, updatedAt: new Date().toISOString() } }
+      const existing = await query('SELECT * FROM offers WHERE id = ?', [body.id]);
+      if (existing && existing.length > 0) {
+        const result = await query(
+          `UPDATE offers SET 
+           title = ?, description = ?, image = ?, mapLink = ?, category = ?, 
+           city = ?, area = ?, expiryDate = ?, updatedAt = NOW() 
+           WHERE id = ?`,
+          [
+            body.title,
+            body.description,
+            body.image || null,
+            body.mapLink || null,
+            body.category || null,
+            body.city,
+            body.area,
+            body.expiryDate ? new Date(body.expiryDate) : null,
+            body.id
+          ]
         );
 
         return NextResponse.json({
           success: true,
-          updated: result.modifiedCount === 1,
+          updated: result.affectedRows === 1,
         });
       }
     }
 
     // ➕ Insert new offer
-    const last = await collection.find().sort({ id: -1 }).limit(1).toArray();
-    const newId = last.length > 0 ? last[0].id + 1 : 1;
+    const result = await query(
+      `INSERT INTO offers (title, description, image, mapLink, category, city, area, expiryDate, createdAt, createdBy) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [
+        body.title,
+        body.description,
+        body.image || null,
+        body.mapLink || null,
+        body.category || null,
+        body.city,
+        body.area,
+        body.expiryDate ? new Date(body.expiryDate) : null,
+        'admin'
+      ]
+    );
 
-    const newOffer = {
-      ...body,
-      id: newId,
-      createdAt: new Date().toISOString(),
-      createdBy: "admin",
-      city: body.city,
-      area: body.area,
-    };
-
-    const result = await collection.insertOne(newOffer);
-
-    return NextResponse.json({ success: true, insertedId: result.insertedId });
+    return NextResponse.json({ success: true, insertedId: result.insertId });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: "Internal server error" },
@@ -102,16 +111,12 @@ export async function POST(req) {
 
 export async function GET() {
   try {
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("offers");
-
-    const now = new Date().toISOString();
+    const now = new Date();
 
     // Optionally delete expired offers
-    await collection.deleteMany({ expiryDate: { $lte: now } });
+    await query('DELETE FROM offers WHERE expiryDate IS NOT NULL AND expiryDate <= ?', [now]);
 
-    const offers = await collection.find().sort({ createdAt: -1 }).toArray();
+    const offers = await query('SELECT * FROM offers ORDER BY createdAt DESC');
 
     return NextResponse.json(offers);
   } catch (error) {

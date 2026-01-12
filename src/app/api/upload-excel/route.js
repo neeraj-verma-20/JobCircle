@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 
 export async function POST(request) {
   try {
@@ -21,12 +21,8 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'No data found in Excel file' }, { status: 400 });
     }
 
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offers');
-
     // Get the next ID
-    const lastOffer = await collection.find().sort({ id: -1 }).limit(1).toArray();
+    const lastOffer = await query('SELECT id FROM offers ORDER BY id DESC LIMIT 1');
     let nextId = lastOffer.length > 0 ? lastOffer[0].id + 1 : 1;
 
     const offers = [];
@@ -68,24 +64,21 @@ export async function POST(request) {
           }
         }
 
-        const offer = {
-          id: nextId++,
-          title: row.Title.trim(),
-          description: row.Description.trim(),
-          image: imageUrl,
-          category: row.Category.trim(),
-          ownerName: row.OwnerName?.trim() || '',
-          phoneNumber: row.PhoneNumber?.trim() || '',
-          city: row.City.trim(),
-          area: row.Area.trim(),
-          mapLink: row.MapLink?.trim() || '',
-          socialLink: row.SocialLink?.trim() || '',
-          expiryDate: row.ExpiryDate || '',
-          createdAt: new Date().toISOString()
-        };
-
-        await collection.insertOne(offer);
-        offers.push(offer);
+        await query(
+          `INSERT INTO offers (id, title, description, image, category, city, area, mapLink, expiryDate, createdAt) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            nextId++,
+            row.Title.trim(),
+            row.Description.trim(),
+            imageUrl,
+            row.Category.trim(),
+            row.City.trim(),
+            row.Area.trim(),
+            row.MapLink?.trim() || null,
+            row.ExpiryDate ? new Date(row.ExpiryDate) : null
+          ]
+        );
         successCount++;
       } catch (error) {
         console.error('Error processing row:', row, error);

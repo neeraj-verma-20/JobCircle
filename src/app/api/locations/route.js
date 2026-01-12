@@ -1,4 +1,4 @@
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 import { NextResponse } from 'next/server';
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../lib/authOptions";
@@ -6,27 +6,25 @@ import { authOptions } from "../../../lib/authOptions";
 // ✅ GET: Fetch locations (admin sees all, public sees only enabled)
 export async function GET(req) {
   try {
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('locations');
-
     // Check if this is an admin request
     const session = await getServerSession(authOptions);
     const isAdmin = !!session;
 
-    let query = {};
-    if (!isAdmin) {
-      // Public users only see enabled locations (or locations without status field)
-      query = {
-        $or: [
-          { status: 'enabled' },
-          { status: { $exists: false } } // Include locations without status (legacy)
-        ]
-      };
+    let locations;
+    if (isAdmin) {
+      locations = await query('SELECT * FROM locations ORDER BY city ASC');
+    } else {
+      // Public users only see enabled locations
+      locations = await query('SELECT * FROM locations WHERE status = ? OR status IS NULL ORDER BY city ASC', ['enabled']);
     }
-
-    const locations = await collection.find(query).sort({ city: 1 }).toArray();
-    return NextResponse.json(locations);
+    
+    // Parse JSON areas field
+    const parsedLocations = locations.map(loc => ({
+      ...loc,
+      areas: typeof loc.areas === 'string' ? JSON.parse(loc.areas) : loc.areas
+    }));
+    
+    return NextResponse.json(parsedLocations);
   } catch (error) {
     return NextResponse.json(
       { success: false, error: "Internal server error" },
@@ -53,18 +51,12 @@ export async function POST(req) {
       );
     }
 
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("locations");
-
-    const newLocation = {
-      city: city.trim(),
-      areas: areas.map(area => area.trim()).filter(area => area),
-      createdAt: new Date().toISOString()
-    };
-
-    const result = await collection.insertOne(newLocation);
-    return NextResponse.json({ success: true, insertedId: result.insertedId });
+    const result = await query(
+      'INSERT INTO locations (city, areas, createdAt) VALUES (?, ?, NOW())',
+      [city.trim(), JSON.stringify(areas.map(area => area.trim()).filter(area => area))]
+    );
+    
+    return NextResponse.json({ success: true, insertedId: result.insertId });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: "Internal server error" },
@@ -91,28 +83,19 @@ export async function PUT(req) {
       );
     }
 
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("locations");
-
-    const result = await collection.updateOne(
-      { city: city.trim() },
-      { 
-        $set: { 
-          areas: areas.map(area => area.trim()).filter(area => area),
-          updatedAt: new Date().toISOString()
-        } 
-      }
+    const result = await query(
+      'UPDATE locations SET areas = ?, updatedAt = NOW() WHERE city = ?',
+      [JSON.stringify(areas.map(area => area.trim()).filter(area => area)), city.trim()]
     );
 
-    if (result.matchedCount === 0) {
+    if (result.affectedRows === 0) {
       return NextResponse.json(
         { success: false, error: "Location not found" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ success: true, updated: result.modifiedCount === 1 });
+    return NextResponse.json({ success: true, updated: result.affectedRows === 1 });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: "Internal server error" },
@@ -139,21 +122,12 @@ export async function PATCH(req) {
       );
     }
 
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("locations");
-
-    const result = await collection.updateOne(
-      { city: city.trim() },
-      { 
-        $set: { 
-          status: status,
-          updatedAt: new Date().toISOString()
-        } 
-      }
+    const result = await query(
+      'UPDATE locations SET status = ?, updatedAt = NOW() WHERE city = ?',
+      [status, city.trim()]
     );
 
-    if (result.matchedCount === 0) {
+    if (result.affectedRows === 0) {
       return NextResponse.json(
         { success: false, error: "Location not found" },
         { status: 404 }
@@ -162,7 +136,7 @@ export async function PATCH(req) {
 
     return NextResponse.json({ 
       success: true, 
-      updated: result.modifiedCount === 1,
+      updated: result.affectedRows === 1,
       status: status 
     });
   } catch (error) {
@@ -191,20 +165,16 @@ export async function DELETE(req) {
       );
     }
 
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("locations");
+    const result = await query('DELETE FROM locations WHERE city = ?', [city.trim()]);
 
-    const result = await collection.deleteOne({ city: city.trim() });
-
-    if (result.deletedCount === 0) {
+    if (result.affectedRows === 0) {
       return NextResponse.json(
         { success: false, error: "Location not found" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ success: true, deleted: result.deletedCount === 1 });
+    return NextResponse.json({ success: true, deleted: result.affectedRows === 1 });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: "Internal server error" },

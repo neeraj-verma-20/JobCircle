@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 import { v2 as cloudinary } from 'cloudinary';
 
 // Configure Cloudinary using environment variables
@@ -13,20 +13,8 @@ cloudinary.config({
 // GET all banners
 export async function GET() {
   try {
-    // Check if MongoDB URI exists
-    if (!process.env.MONGODB_URI) {
-      return NextResponse.json(
-        { error: 'MONGODB_URI environment variable is not set' },
-        { status: 500 }
-      );
-    }
-
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('banners');
-
     // Get all active banners, sorted by order
-    const banners = await collection.find({ active: true }).sort({ order: 1 }).toArray();
+    let banners = await query('SELECT * FROM banners WHERE active = 1 ORDER BY `order` ASC');
 
     // If no banners exist, create some sample ones
     if (banners.length === 0) {
@@ -37,9 +25,7 @@ export async function GET() {
           imageUrl: 'https://via.placeholder.com/800x300/4F46E5/FFFFFF?text=Welcome+to+OfferBae',
           link: '#',
           active: true,
-          order: 1,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          order: 1
         },
         {
           title: 'Best Deals Today',
@@ -47,14 +33,19 @@ export async function GET() {
           imageUrl: 'https://via.placeholder.com/800x300/10B981/FFFFFF?text=Best+Deals+Today',
           link: '#',
           active: true,
-          order: 2,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          order: 2
         }
       ];
 
-      await collection.insertMany(sampleBanners);
-      return NextResponse.json(sampleBanners, { status: 200 });
+      for (const banner of sampleBanners) {
+        await query(
+          'INSERT INTO banners (title, description, imageUrl, link, active, `order`, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
+          [banner.title, banner.description, banner.imageUrl, banner.link, banner.active, banner.order]
+        );
+      }
+      
+      banners = await query('SELECT * FROM banners WHERE active = 1 ORDER BY `order` ASC');
+      return NextResponse.json(banners, { status: 200 });
     }
 
     return NextResponse.json(banners, { status: 200 });
@@ -70,16 +61,6 @@ export async function GET() {
 // POST a new banner
 export async function POST(request) {
   try {
-    if (!process.env.MONGODB_URI) {
-      return NextResponse.json(
-        { error: 'MONGODB_URI environment variable is not set' },
-        { status: 500 }
-      );
-    }
-
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('banners');
 
     // Check if request contains FormData (file upload) or JSON
     const contentType = request.headers.get('content-type');
@@ -128,7 +109,8 @@ export async function POST(request) {
       }
 
       // Calculate order if not provided
-      const finalOrder = order || (await collection.countDocuments()) + 1;
+      const countResult = await query('SELECT COUNT(*) as count FROM banners');
+      const finalOrder = order || countResult[0].count + 1;
 
       data = {
         title,
@@ -152,16 +134,22 @@ export async function POST(request) {
       }
     }
 
-    // Create new banner with timestamp
-    const newBanner = {
-      ...data,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+    // Create new banner
+    const result = await query(
+      'INSERT INTO banners (title, description, imageUrl, link, openInNewTab, active, `order`, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      [
+        data.title || null,
+        data.description || null,
+        data.imageUrl,
+        data.link || null,
+        data.openInNewTab || false,
+        data.active !== undefined ? data.active : true,
+        data.order || 0
+      ]
+    );
 
-    const result = await collection.insertOne(newBanner);
-
-    return NextResponse.json({ ...newBanner, _id: result.insertedId.toString() }, { status: 201 });
+    const newBanner = await query('SELECT * FROM banners WHERE id = ?', [result.insertId]);
+    return NextResponse.json(newBanner[0], { status: 201 });
   } catch (error) {
     console.error('Error creating banner:', error);
     console.error('Error stack:', error.stack);

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import JobApplicationModal from "./JobApplicationModal";
 
 const infoBlocks = [
   {
@@ -35,6 +36,7 @@ const infoBlocks = [
 
 export default function DetailedOfferCard({ offer, onBack }) {
   const [descExpanded, setDescExpanded] = useState(false);
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
 
   // Scroll to top when component mounts
   useEffect(() => {
@@ -162,16 +164,12 @@ export default function DetailedOfferCard({ offer, onBack }) {
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3 mt-2 w-full">
-            {offer.mapLink && (
-              <a
-                href={offer.mapLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold py-3 px-6 rounded-lg text-center hover:from-indigo-600 hover:to-purple-700 transition-all duration-200 shadow-md hover:shadow-lg text-base"
-              >
-                📍 View on Google Maps
-              </a>
-            )}
+            <button
+              onClick={() => setShowApplicationModal(true)}
+              className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 px-6 rounded-lg text-center hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-md hover:shadow-lg text-base"
+            >
+              ✉️ Apply for Job
+            </button>
             <button
               onClick={onBack}
               className="flex-1 bg-gray-100 text-gray-700 font-semibold py-3 px-6 rounded-lg hover:bg-gray-200 transition-colors border border-gray-200 text-base"
@@ -181,6 +179,14 @@ export default function DetailedOfferCard({ offer, onBack }) {
           </div>
         </div>
       </div>
+
+      {/* Job Application Modal */}
+      <JobApplicationModal
+        isOpen={showApplicationModal}
+        onClose={() => setShowApplicationModal(false)}
+        job={offer}
+        redirectLink={offer.mapLink || offer.socialLink}
+      />
     </div>
   );
 }

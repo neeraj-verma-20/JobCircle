@@ -1,4 +1,4 @@
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 import { NextResponse } from 'next/server';
 
 // ✅ POST: Create new offer
@@ -11,23 +11,23 @@ export async function POST(req) {
       return NextResponse.json({ success: false, error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offers');
+    // Insert new offer (id is auto-increment)
+    const result = await query(
+      `INSERT INTO offers (title, description, image, mapLink, category, city, area, expiryDate, createdAt) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        body.title,
+        body.description,
+        body.image || null,
+        body.mapLink || null,
+        body.category || null,
+        body.city || null,
+        body.area || null,
+        body.expiryDate ? new Date(body.expiryDate) : null
+      ]
+    );
 
-    // Auto-generate unique ID
-    const lastOffer = await collection.find().sort({ id: -1 }).limit(1).toArray();
-    const newId = lastOffer.length > 0 ? lastOffer[0].id + 1 : 1;
-
-    const newOffer = {
-      ...body,
-      id: newId,
-      createdAt: new Date().toISOString(),
-    };
-
-    const result = await collection.insertOne(newOffer);
-
-    return NextResponse.json({ success: true, insertedId: result.insertedId });
+    return NextResponse.json({ success: true, insertedId: result.insertId });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: "Internal server error" },
@@ -39,11 +39,7 @@ export async function POST(req) {
 // ✅ GET: Fetch all offers (without filtering expiry)
 export async function GET() {
   try {
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("offers");
-
-    const offers = await collection.find().sort({ createdAt: -1 }).toArray();
+    const offers = await query('SELECT * FROM offers ORDER BY createdAt DESC');
     return NextResponse.json(offers);
   } catch (error) {
     return NextResponse.json([], { status: 500 });
@@ -53,13 +49,8 @@ export async function GET() {
 // ✅ DELETE: Clear all offers
 export async function DELETE() {
   try {
-    const client = await clientPromise;
-    const db = client.db("dealsDB");
-    const collection = db.collection("offers");
-
-    const result = await collection.deleteMany({});
-
-    return NextResponse.json({ success: true, deletedCount: result.deletedCount });
+    const result = await query('DELETE FROM offers');
+    return NextResponse.json({ success: true, deletedCount: result.affectedRows });
   } catch (error) {
     console.error("Error clearing offers:", error);
     return NextResponse.json(

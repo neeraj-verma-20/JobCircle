@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/authOptions';
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 
 // ✅ DELETE Offer by ID (POST)
 export async function POST(request) {
@@ -18,13 +18,9 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Invalid or missing ID.' }, { status: 400 });
     }
 
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offers');
-
     // ✅ Delete offer
-    const result = await collection.deleteOne({ id });
-    if (result.deletedCount === 0) {
+    const result = await query('DELETE FROM offers WHERE id = ?', [id]);
+    if (result.affectedRows === 0) {
       return NextResponse.json({ success: false, error: 'Offer not found.' }, { status: 404 });
     }
 
@@ -45,11 +41,7 @@ export async function GET() {
   }
 
   try {
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offers');
-
-    const offers = await collection.find().sort({ createdAt: -1 }).toArray();
+    const offers = await query('SELECT * FROM offers ORDER BY createdAt DESC');
     return NextResponse.json(offers);
   } catch (error) {
     return NextResponse.json([], { status: 500 });

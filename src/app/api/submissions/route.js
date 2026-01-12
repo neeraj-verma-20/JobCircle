@@ -1,15 +1,11 @@
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 import { NextResponse } from 'next/server';
 
 // GET: list submissions
 export async function GET(req) {
   try {
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offer_submissions');
-    const submissions = await collection.find().sort({ createdAt: -1 }).toArray();
-    const sanitized = submissions.map(s => ({ ...s, _id: s._id?.toString?.() || s._id }));
-    return NextResponse.json(sanitized);
+    const submissions = await query('SELECT * FROM offer_submissions ORDER BY createdAt DESC');
+    return NextResponse.json(submissions);
   } catch (error) {
     console.error('[API:/api/submissions][GET] Error:', error);
     return NextResponse.json({ success:false, error: error?.message || 'Internal server error' }, { status: 500 });
@@ -23,31 +19,44 @@ export async function PUT(req) {
     const { id, action } = body;
     if (!id || !action) return NextResponse.json({ success:false, error:'id and action required' }, { status: 400 });
 
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const submissions = db.collection('offer_submissions');
-    const offers = db.collection('offers');
+    const doc = await query('SELECT * FROM offer_submissions WHERE id = ?', [id]);
+    if (!doc || doc.length === 0) return NextResponse.json({ success:false, error:'Submission not found' }, { status: 404 });
 
-    const { ObjectId } = await import('mongodb');
-    const _id = new ObjectId(id);
-    const doc = await submissions.findOne({ _id });
-    if (!doc) return NextResponse.json({ success:false, error:'Submission not found' }, { status: 404 });
+    const submission = doc[0];
 
     if (action === 'approve') {
-      const last = await offers.find().sort({ id: -1 }).limit(1).toArray();
-      const newId = last.length > 0 ? last[0].id + 1 : 1;
-      const { _id: sid, status, ...rest } = doc;
-      const image = (typeof doc.image === 'string' && doc.image.trim() !== '')
-        ? doc.image
-        : ((typeof doc.imageUrl === 'string' && doc.imageUrl.trim() !== '') ? doc.imageUrl : '');
-      const toInsert = { ...rest, image, id: newId, createdAt: new Date().toISOString() };
-      await offers.insertOne(toInsert);
-      await submissions.updateOne({ _id }, { $set: { status: 'approved', updatedAt: new Date().toISOString() } });
+      // Get next ID for offers
+      const lastOffer = await query('SELECT id FROM offers ORDER BY id DESC LIMIT 1');
+      const newId = lastOffer.length > 0 ? lastOffer[0].id + 1 : 1;
+      
+      const image = (submission.image && submission.image.trim() !== '')
+        ? submission.image
+        : ((submission.imageUrl && submission.imageUrl.trim() !== '') ? submission.imageUrl : null);
+      
+      // Insert into offers
+      await query(
+        `INSERT INTO offers (id, title, description, image, mapLink, category, city, area, expiryDate, createdAt) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          newId,
+          submission.title,
+          submission.description,
+          image,
+          submission.mapLink,
+          submission.category,
+          submission.city,
+          submission.area,
+          submission.expiryDate
+        ]
+      );
+      
+      // Update submission status
+      await query('UPDATE offer_submissions SET status = ?, updatedAt = NOW() WHERE id = ?', ['approved', id]);
       return NextResponse.json({ success:true, approved:true });
     }
 
     if (action === 'reject') {
-      await submissions.updateOne({ _id }, { $set: { status: 'rejected', updatedAt: new Date().toISOString() } });
+      await query('UPDATE offer_submissions SET status = ?, updatedAt = NOW() WHERE id = ?', ['rejected', id]);
       return NextResponse.json({ success:true, rejected:true });
     }
 
@@ -67,23 +76,10 @@ export async function PATCH(req) {
     if (!id) {
       return NextResponse.json({ success: false, error: 'Submission ID required' }, { status: 400 });
     }
-
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offer_submissions');
-    
-    const { ObjectId } = await import('mongodb');
-    
-    // Validate ObjectId format
-    if (!ObjectId.isValid(id)) {
-      return NextResponse.json({ success: false, error: 'Invalid submission ID format' }, { status: 400 });
-    }
-    
-    const _id = new ObjectId(id);
     
     // Check if submission exists
-    const existingSubmission = await collection.findOne({ _id });
-    if (!existingSubmission) {
+    const existingSubmission = await query('SELECT * FROM offer_submissions WHERE id = ?', [id]);
+    if (!existingSubmission || existingSubmission.length === 0) {
       return NextResponse.json({ success: false, error: 'Submission not found' }, { status: 404 });
     }
     
@@ -93,32 +89,33 @@ export async function PATCH(req) {
       'city', 'area', 'mapLink', 'socialLink', 'expiryDate', 'imageUrl'
     ];
     
-    const sanitizedUpdateData = {};
+    const updates = [];
+    const values = [];
+    
     allowedFields.forEach(field => {
-      if (updateData.hasOwnProperty(field)) {
-        sanitizedUpdateData[field] = updateData[field];
+      if (updateData.hasOwnProperty(field) && updateData[field] !== undefined && updateData[field] !== null) {
+        updates.push(`${field} = ?`);
+        if (field === 'expiryDate') {
+          values.push(new Date(updateData[field]));
+        } else {
+          values.push(updateData[field]);
+        }
       }
     });
     
-    // Remove any undefined, null, or empty object properties
-    Object.keys(sanitizedUpdateData).forEach(key => {
-      if (sanitizedUpdateData[key] === undefined || sanitizedUpdateData[key] === null) {
-        delete sanitizedUpdateData[key];
-      }
-    });
+    if (updates.length === 0) {
+      return NextResponse.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
+    }
+    
+    values.push(id);
     
     // Update the submission with new data
-    const result = await collection.updateOne(
-      { _id },
-      { 
-        $set: { 
-          ...sanitizedUpdateData, 
-          updatedAt: new Date().toISOString() 
-        } 
-      }
+    const result = await query(
+      `UPDATE offer_submissions SET ${updates.join(', ')}, updatedAt = NOW() WHERE id = ?`,
+      values
     );
     
-    if (result.matchedCount === 0) {
+    if (result.affectedRows === 0) {
       return NextResponse.json({ success: false, error: 'Submission not found' }, { status: 404 });
     }
     
@@ -135,16 +132,12 @@ export async function PATCH(req) {
 // DELETE: Clear all submissions
 export async function DELETE() {
   try {
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offer_submissions');
-
-    const result = await collection.deleteMany({});
+    const result = await query('DELETE FROM offer_submissions');
 
     return NextResponse.json({ 
       success: true, 
-      deletedCount: result.deletedCount,
-      message: `Successfully cleared ${result.deletedCount} submissions`
+      deletedCount: result.affectedRows,
+      message: `Successfully cleared ${result.affectedRows} submissions`
     });
   } catch (error) {
     console.error('[API:/api/submissions][DELETE] Error:', error);

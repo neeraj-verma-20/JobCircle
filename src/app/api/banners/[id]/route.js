@@ -1,33 +1,26 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
-import { ObjectId } from 'mongodb';
+import { query } from '../../../../lib/mysql';
 
 // GET a single banner by ID
 export async function GET(request, { params }) {
   try {
-    if (!process.env.MONGODB_URI) {
-      return NextResponse.json({ error: 'Database configuration missing' }, { status: 500 });
-    }
-
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('banners');
-
     const { id } = await params;
-    if (!ObjectId.isValid(id)) {
+    const bannerId = parseInt(id);
+    
+    if (isNaN(bannerId)) {
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
     }
     
-    const banner = await collection.findOne({ _id: new ObjectId(id) });
+    const banners = await query('SELECT * FROM banners WHERE id = ?', [bannerId]);
 
-    if (!banner) {
+    if (!banners || banners.length === 0) {
       return NextResponse.json(
         { error: 'Banner not found' },
         { status: 404 }
       );
     }
 
-    return NextResponse.json(banner, { status: 200 });
+    return NextResponse.json(banners[0], { status: 200 });
   } catch (error) {
     console.error('Error fetching banner:', error);
     return NextResponse.json(
@@ -40,36 +33,48 @@ export async function GET(request, { params }) {
 // PUT/UPDATE a banner by ID
 export async function PUT(request, { params }) {
   try {
-    if (!process.env.MONGODB_URI) {
-      return NextResponse.json({ error: 'Database configuration missing' }, { status: 500 });
-    }
-
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('banners');
-
     const { id } = await params;
-    if (!ObjectId.isValid(id)) {
+    const bannerId = parseInt(id);
+    
+    if (isNaN(bannerId)) {
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
     }
     
     const data = await request.json();
 
-    // Find and update the banner
-    const result = await collection.findOneAndUpdate(
-      { _id: new ObjectId(id) },
-      { $set: { ...data, updatedAt: new Date().toISOString() } },
-      { returnDocument: 'after' }
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    
+    if (data.title !== undefined) { updates.push('title = ?'); values.push(data.title); }
+    if (data.description !== undefined) { updates.push('description = ?'); values.push(data.description); }
+    if (data.imageUrl !== undefined) { updates.push('imageUrl = ?'); values.push(data.imageUrl); }
+    if (data.link !== undefined) { updates.push('link = ?'); values.push(data.link); }
+    if (data.openInNewTab !== undefined) { updates.push('openInNewTab = ?'); values.push(data.openInNewTab); }
+    if (data.active !== undefined) { updates.push('active = ?'); values.push(data.active); }
+    if (data.order !== undefined) { updates.push('`order` = ?'); values.push(data.order); }
+    
+    if (updates.length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
+    
+    updates.push('updatedAt = NOW()');
+    values.push(bannerId);
+
+    const result = await query(
+      `UPDATE banners SET ${updates.join(', ')} WHERE id = ?`,
+      values
     );
 
-    if (!result) {
+    if (result.affectedRows === 0) {
       return NextResponse.json(
         { error: 'Banner not found' },
         { status: 404 }
       );
     }
 
-    return NextResponse.json(result, { status: 200 });
+    const updatedBanner = await query('SELECT * FROM banners WHERE id = ?', [bannerId]);
+    return NextResponse.json(updatedBanner[0], { status: 200 });
   } catch (error) {
     console.error('Error updating banner:', error);
     return NextResponse.json(
@@ -82,22 +87,16 @@ export async function PUT(request, { params }) {
 // DELETE a banner by ID
 export async function DELETE(request, { params }) {
   try {
-    if (!process.env.MONGODB_URI) {
-      return NextResponse.json({ error: 'Database configuration missing' }, { status: 500 });
-    }
-
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('banners');
-
     const { id } = await params;
-    if (!ObjectId.isValid(id)) {
+    const bannerId = parseInt(id);
+    
+    if (isNaN(bannerId)) {
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
     }
     
-    const result = await collection.findOneAndDelete({ _id: new ObjectId(id) });
+    const result = await query('DELETE FROM banners WHERE id = ?', [bannerId]);
 
-    if (!result) {
+    if (result.affectedRows === 0) {
       return NextResponse.json(
         { error: 'Banner not found' },
         { status: 404 }

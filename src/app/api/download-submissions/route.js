@@ -1,4 +1,4 @@
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 
@@ -14,28 +14,22 @@ export async function GET(request) {
     const includeRejected = searchParams.get('includeRejected') === 'true';
     const includePending = searchParams.get('includePending') === 'true';
 
-    const client = await clientPromise;
-    const db = client.db('dealsDB');
-    const collection = db.collection('offer_submissions');
-
     // Build query filter
-    let query = {};
+    let sqlQuery = 'SELECT * FROM offer_submissions WHERE status = ?';
+    const params = ['approved'];
 
     // Date range filter
-    if (dateFrom || dateTo) {
-      query.createdAt = {};
-      if (dateFrom) {
-        query.createdAt.$gte = new Date(dateFrom + 'T00:00:00.000Z');
-      }
-      if (dateTo) {
-        query.createdAt.$lte = new Date(dateTo + 'T23:59:59.999Z');
-      }
+    if (dateFrom) {
+      sqlQuery += ' AND createdAt >= ?';
+      params.push(new Date(dateFrom + 'T00:00:00.000Z'));
+    }
+    if (dateTo) {
+      sqlQuery += ' AND createdAt <= ?';
+      params.push(new Date(dateTo + 'T23:59:59.999Z'));
     }
 
-    // Status filter - Always filter for approved only for unique downloads
-    query.status = 'approved';
-
-    const submissions = await collection.find(query).sort({ createdAt: -1 }).toArray();
+    sqlQuery += ' ORDER BY createdAt DESC';
+    const submissions = await query(sqlQuery, params);
 
     // Remove duplicates based on key fields (title, ownerName, phoneNumber, city, area)
     const uniqueSubmissions = [];
@@ -64,9 +58,9 @@ export async function GET(request) {
       Area: s.area || '',
       MapLink: s.mapLink || '',
       SocialLink: s.socialLink || '',
-      ExpiryDate: s.expiryDate || '',
+      ExpiryDate: s.expiryDate ? new Date(s.expiryDate).toISOString().split('T')[0] : '',
       Status: s.status || 'pending',
-      SubmittedAt: s.submittedAt || s.createdAt || '',
+      SubmittedAt: s.createdAt ? new Date(s.createdAt).toISOString() : '',
       CreatedAt: s.createdAt ? new Date(s.createdAt).toLocaleString() : '',
     }));
 

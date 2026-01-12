@@ -15,7 +15,7 @@
     "cloudinary": "^2.7.0",
     "dotenv": "^17.2.1",
     "lucide-react": "^0.525.0",
-    "mongodb": "^6.17.0",
+    "mysql2": "^3.11.5",
     "next": "15.3.3",
     "next-auth": "^4.24.11",
     "react": "^19.0.0",
@@ -23,7 +23,8 @@
     "react-easy-crop": "^5.5.0",
     "react-slick": "^0.31.0",
     "slick-carousel": "^1.8.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "firebase": "^10.13.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

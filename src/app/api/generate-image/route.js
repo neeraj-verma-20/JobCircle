@@ -1,17 +1,15 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 
 export async function POST(request) {
   try {
     const { formData, style = 'realistic' } = await request.json();
 
     // Check AI availability first
-    const client = await clientPromise;
-    const db = client.db('offerwala');
+    let settingsResult = await query('SELECT * FROM ai_settings WHERE type = ?', ['image_generation']);
 
-    let settings = await db.collection('ai_settings').findOne({ type: 'image_generation' });
-
-    if (!settings) {
+    let settings;
+    if (!settingsResult || settingsResult.length === 0) {
       // Create default settings
       settings = {
         type: 'image_generation',
@@ -23,7 +21,22 @@ export async function POST(request) {
         lastResetDate: new Date().toISOString().split('T')[0],
         lastMonthReset: new Date().toISOString().substring(0, 7)
       };
-      await db.collection('ai_settings').insertOne(settings);
+      await query(
+        `INSERT INTO ai_settings (type, enabled, dailyLimit, monthlyLimit, currentDailyUsage, currentMonthlyUsage, lastResetDate, lastMonthReset, createdAt, updatedAt) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          settings.type,
+          settings.enabled,
+          settings.dailyLimit,
+          settings.monthlyLimit,
+          settings.currentDailyUsage,
+          settings.currentMonthlyUsage,
+          settings.lastResetDate,
+          settings.lastMonthReset
+        ]
+      );
+    } else {
+      settings = settingsResult[0];
     }
 
     // Check if AI generation is enabled
@@ -224,19 +237,9 @@ export async function POST(request) {
     }
 
     // Update usage counters
-    await db.collection('ai_settings').updateOne(
-      { type: 'image_generation' },
-      {
-        $inc: {
-          currentDailyUsage: 1,
-          currentMonthlyUsage: 1
-        },
-        $set: {
-          lastResetDate: today,
-          lastMonthReset: currentMonth,
-          updatedAt: new Date()
-        }
-      }
+    await query(
+      'UPDATE ai_settings SET currentDailyUsage = currentDailyUsage + 1, currentMonthlyUsage = currentMonthlyUsage + 1, lastResetDate = ?, lastMonthReset = ?, updatedAt = NOW() WHERE type = ?',
+      [today, currentMonth, 'image_generation']
     );
 
     return NextResponse.json({

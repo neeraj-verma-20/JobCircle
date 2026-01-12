@@ -1,18 +1,16 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import { query } from '../../../lib/mysql';
 
 export async function POST(request) {
   try {
     const { category, city, area, expiryDate, keywords } = await request.json();
 
     // Check AI availability for title and description generation
-    const client = await clientPromise;
-    const db = client.db('offerwala');
-
-    let settings = await db.collection('ai_settings').findOne({ type: 'image_generation' });
+    let settingsResult = await query('SELECT * FROM ai_settings WHERE type = ?', ['image_generation']);
 
     // Default settings if none exist
-    if (!settings) {
+    let settings;
+    if (!settingsResult || settingsResult.length === 0) {
       settings = {
         titleGeneration: true,
         descriptionGeneration: true,
@@ -21,6 +19,8 @@ export async function POST(request) {
         currentDailyUsage: 0,
         currentMonthlyUsage: 0
       };
+    } else {
+      settings = settingsResult[0];
     }
 
     // Check if either title or description generation is enabled
@@ -204,16 +204,9 @@ Remember: Always respect the word limits. Always return valid JSON with "title" 
     }
 
     // Increment usage counter
-    await db.collection('ai_settings').updateOne(
-      { type: 'image_generation' },
-      {
-        $inc: {
-          currentDailyUsage: 1,
-          currentMonthlyUsage: 1
-        },
-        $set: { updatedAt: new Date() }
-      },
-      { upsert: true }
+    await query(
+      'UPDATE ai_settings SET currentDailyUsage = currentDailyUsage + 1, currentMonthlyUsage = currentMonthlyUsage + 1, updatedAt = NOW() WHERE type = ?',
+      ['image_generation']
     );
 
     // Return only the fields that are enabled
