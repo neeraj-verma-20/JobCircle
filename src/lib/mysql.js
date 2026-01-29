@@ -2,10 +2,11 @@
 import mysql from 'mysql2/promise';
 
 const dbConfig = {
-  host: process.env.MYSQL_HOST || 'localhost',
+  host: process.env.MYSQL_HOST || 'switchyard.proxy.rlwy.net',
   user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '',
+  password: process.env.MYSQL_PASSWORD || 'AACFuTClURlUdimRpAppFKTqfgHRoXoi',
   database: process.env.MYSQL_DATABASE || 'dealsDB',
+  port: parseInt(process.env.MYSQL_PORT || '12665'), // Added port for Railway
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
